@@ -370,8 +370,8 @@
         "RouteTableId" : { "Ref" : "PublicRouteTable" }
       }
     },
-	"KongLoadBalancerNewVPC": {
-   	  "Condition" : "CreateVpcResources",
+    "KongLoadBalancerNewVPC": {
+      "Condition" : "CreateVpcResources",
       "Type": "AWS::ElasticLoadBalancing::LoadBalancer",
       "Properties": {
         "SecurityGroups" : [ { "Ref" : "LoadBalancerSecurityGroup" } ],
@@ -382,6 +382,11 @@
             "LoadBalancerPort": "8000",
             "InstancePort": "8000",
             "Protocol": "HTTP"
+          },
+          {
+            "LoadBalancerPort": "443",
+            "InstancePort": "8443",
+            "Protocol": "TCP"
           },
           {
             "LoadBalancerPort": "8001",
@@ -415,6 +420,11 @@
             "Protocol": "HTTP"
           },
           {
+            "LoadBalancerPort": "443",
+            "InstancePort": "8443",
+            "Protocol": "TCP"
+          },
+          {
             "LoadBalancerPort": "8001",
             "InstancePort": "8001",
             "Protocol": "HTTP"
@@ -435,23 +445,24 @@
         "GroupDescription" : "Enable HTTP access on port 8000 and 8001",
         "VpcId" : { "Fn::If" : [ "CreateVpcResources", { "Ref" : "VPC" }, { "Ref" : "VpcId" } ] },
         "SecurityGroupIngress" : [ 
-          						   { "IpProtocol" : "tcp", "FromPort" : "8000", "ToPort" : "8000", "CidrIp" : { "Ref" : "KongProxyAccess" } },
-          						   { "IpProtocol" : "tcp", "FromPort" : "8001", "ToPort" : "8001", "CidrIp" : { "Ref" : "KongAdminAccess" } }
-          						 ],
+                                   { "IpProtocol" : "tcp", "FromPort" : "8000", "ToPort" : "8000", "CidrIp" : { "Ref" : "KongProxyAccess" } },
+                                   { "IpProtocol" : "tcp", "FromPort" : "443", "ToPort" : "443", "CidrIp" : { "Ref" : "KongProxyAccess" } },
+                                   { "IpProtocol" : "tcp", "FromPort" : "8001", "ToPort" : "8001", "CidrIp" : { "Ref" : "KongAdminAccess" } }
+                                 ],
         "SecurityGroupEgress" :  [ 
-          							{ "IpProtocol" : "tcp", "FromPort" : "1", "ToPort" : "65535", "CidrIp" : "0.0.0.0/0" }
-          						 ]
+                                   { "IpProtocol" : "tcp", "FromPort" : "1", "ToPort" : "65535", "CidrIp" : "0.0.0.0/0" }
+                                 ]
       }
     },
 
     "KongScalingGroup": {
       "Type": "AWS::AutoScaling::AutoScalingGroup",
       "CreationPolicy": {
-    		"ResourceSignal": {
-      			"Count"   : { "Ref" : "KongFleetDesiredSize" },
-      			"Timeout": "PT15M"
-    		}
-  	   },
+        "ResourceSignal": {
+          "Count"   : { "Ref" : "KongFleetDesiredSize" },
+          "Timeout": "PT15M"
+        }
+      },
       "Properties": {
         "AvailabilityZones" : { "Fn::If" : [ "CreateVpcResources", [{ "Fn::GetAtt" : [ "PublicSubnet1", "AvailabilityZone" ] }, { "Fn::GetAtt" : [ "PublicSubnet2", "AvailabilityZone" ] }], [{ "Ref" : "Subnet1AZ" }, { "Ref" : "Subnet2AZ" }]]},
         "VPCZoneIdentifier" : { "Fn::If" : [ "CreateVpcResources", [ { "Fn::Join" : [",", [ { "Ref" : "PublicSubnet1" }, { "Ref" : "PublicSubnet2" } ] ] } ], [{ "Ref" : "SubnetId1" }, { "Ref" : "SubnetId2" }] ] },
@@ -556,6 +567,7 @@
         "VpcId" : { "Fn::If" : [ "CreateVpcResources", { "Ref" : "VPC" }, { "Ref" : "VpcId" } ] },
         "SecurityGroupIngress": [
           { "IpProtocol" : "tcp", "FromPort" : "8000", "ToPort" : "8001", "SourceSecurityGroupId" :  { "Ref" : "LoadBalancerSecurityGroup" } },
+          { "IpProtocol" : "tcp", "FromPort" : "8443", "ToPort" : "8443", "SourceSecurityGroupId" :  { "Ref" : "LoadBalancerSecurityGroup" } },
           { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "SSHLocation" } }
         ],
         "SecurityGroupEgress" :  [ 
@@ -584,7 +596,7 @@
       }
     },
     "PostgresDB" : {
-	  "Type" : "AWS::RDS::DBInstance",
+      "Type" : "AWS::RDS::DBInstance",
       "Condition" : "CreateRDS",
       "Properties" : {
         "Engine" : "postgres",
@@ -620,8 +632,7 @@
       "Properties" : {
         "GroupDescription" : "Database security groups",
         "SecurityGroupIngress" : [
-          { "IpProtocol" : "tcp", "FromPort": 5432, "ToPort" : "5432", "SourceSecurityGroupId": {"Ref" : "KongSecurityGroup"}},
-          { "IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "SSHLocation" } }
+          { "IpProtocol" : "tcp", "FromPort": 5432, "ToPort" : "5432", "SourceSecurityGroupId": {"Ref" : "KongSecurityGroup"}}
         ],
         "SecurityGroupEgress" :  [ 
           { "IpProtocol" : "tcp", "FromPort" : "1", "ToPort" : "65535", "CidrIp" : "0.0.0.0/0" }
@@ -640,6 +651,18 @@
             "http:\/\/",
             { "Fn::If" : [ "CreateVpcResources", { "Fn::GetAtt": [ "KongLoadBalancerNewVPC", "DNSName" ]}, { "Fn::GetAtt": [ "KongLoadBalancerExistingVPC", "DNSName" ] } ] },
             ":8000"
+          ]
+        ]
+      }
+    },
+    "ProxySSLURL": {
+      "Description": "Kong Proxy SSL URL",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https:\/\/",
+            { "Fn::If" : [ "CreateVpcResources", { "Fn::GetAtt": [ "KongLoadBalancerNewVPC", "DNSName" ]}, { "Fn::GetAtt": [ "KongLoadBalancerExistingVPC", "DNSName" ] } ] }
           ]
         ]
       }
